@@ -1,0 +1,60 @@
+name: 네이버 메일을 Gmail 로 전달
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+# 앞선 실행이 끝나기 전에 다음 실행이 겹쳐 같은 메일을 두 번 보내는 일을 막는다.
+concurrency:
+  group: naver-gmail-forward
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write # 지난 상태 캐시를 지우는 데만 쓴다.
+
+env:
+  STATE_DIRECTORY: .state
+  STATE_FILE_PATH: .state/naver-inbox-state.json
+  STATE_CACHE_PREFIX: naver-inbox-state-
+
+jobs:
+  forward:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 코드 받기
+        uses: actions/checkout@v7
+
+      # 캐시에는 메일 번호 두 개와 실패 횟수만 들어 있다. 메일 내용은 어디에도 저장하지 않는다.
+      - name: 지난 전달 위치 불러오기
+        id: restore-state
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.STATE_DIRECTORY }}
+          key: ${{ env.STATE_CACHE_PREFIX }}${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ${{ env.STATE_CACHE_PREFIX }}
+
+      - name: 새 메일 전달
+        env:
+          NAVER_USERNAME: ${{ secrets.NAVER_USERNAME }}
+          NAVER_APPLICATION_PASSWORD: ${{ secrets.NAVER_APPLICATION_PASSWORD }}
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+        run: python3 -m naver_gmail_forward
+
+      # 전달 도중 실패했더라도 그때까지 보낸 위치는 남겨야 다음 실행에서 중복 전달이 없다.
+      - name: 전달 위치 저장
+        id: save-state
+        if: always() && hashFiles(env.STATE_FILE_PATH) != ''
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.STATE_DIRECTORY }}
+          key: ${{ env.STATE_CACHE_PREFIX }}${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: 지난 위치 캐시 지우기
+        if: always() && steps.save-state.outcome == 'success' && steps.restore-state.outputs.cache-matched-key != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_CACHE_KEY: ${{ steps.restore-state.outputs.cache-matched-key }}
+        run: gh cache delete "$PREVIOUS_CACHE_KEY" --repo "$GITHUB_REPOSITORY"
