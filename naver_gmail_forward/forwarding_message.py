@@ -2,7 +2,8 @@
 
 본문과 첨부는 그대로 두고 주소 관련 머리글만 바꾼다.
 네이버 SMTP 는 로그인한 계정 주소로만 보낼 수 있으므로 보내는 사람은 내 네이버 주소가 되고,
-원래 보낸 사람은 표시 이름과 '회신 주소(Reply-To)'로 남겨 Gmail 에서 바로 답장할 수 있게 한다.
+원래 보낸 사람의 이름과 주소는 표시 이름에 함께 적어 Gmail 에서 한눈에 보이게 하고,
+'회신 주소(Reply-To)'로도 남겨 답장이 원래 보낸 사람에게 가게 한다.
 """
 
 import email
@@ -10,7 +11,7 @@ from email.header import decode_header, make_header
 from email.message import Message
 from email.utils import formataddr, make_msgid, parseaddr
 
-FORWARDED_SENDER_LABEL = "네이버 메일 전달"
+FORWARDED_SENDER_LABEL = "네이버에서 전달"
 
 # 원래 주소 정보와, 원본 발송 서버의 서명이라 전달 뒤에는 맞지 않게 되는 머리글.
 REPLACED_HEADER_NAMES = (
@@ -48,11 +49,15 @@ def build_forwarding_message(raw_message: bytes, sender_address: str, recipient_
 
 
 def _describe_original_sender(original_sender: str) -> str:
-    if not original_sender:
-        return FORWARDED_SENDER_LABEL
+    """보낸 사람 칸의 표시 이름. 예: 홍길동 (hong@example.com) - 네이버에서 전달"""
     display_name, address = parseaddr(_decode_header_value(original_sender))
-    sender_name = display_name or address or FORWARDED_SENDER_LABEL
-    return f"{sender_name} ({FORWARDED_SENDER_LABEL})"
+    if display_name and address:
+        original_sender_description = f"{display_name} ({address})"
+    else:
+        original_sender_description = display_name or address
+    if not original_sender_description:
+        return FORWARDED_SENDER_LABEL
+    return f"{original_sender_description} - {FORWARDED_SENDER_LABEL}"
 
 
 def _decode_header_value(header_value: str) -> str:

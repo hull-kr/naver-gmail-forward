@@ -1,6 +1,8 @@
 import unittest
+from email.header import decode_header, make_header
+from email.utils import parseaddr
 
-from naver_gmail_forward.forwarding_message import build_forwarding_message
+from naver_gmail_forward.forwarding_message import FORWARDED_SENDER_LABEL, build_forwarding_message
 
 SENDER_ADDRESS = "me@naver.com"
 RECIPIENT_ADDRESS = "me@gmail.com"
@@ -19,13 +21,37 @@ RAW_MESSAGE = (
 ).encode("utf-8")
 
 
+def read_sender_field(message) -> tuple:
+    """메일 프로그램처럼 이름과 주소를 먼저 나눈 뒤 이름만 풀어 (표시 이름, 실제 주소)로 돌려준다."""
+    encoded_display_name, address = parseaddr(message["From"])
+    return str(make_header(decode_header(encoded_display_name))), address
+
+
 class BuildForwardingMessageTest(unittest.TestCase):
     def setUp(self) -> None:
         self.message = build_forwarding_message(RAW_MESSAGE, SENDER_ADDRESS, RECIPIENT_ADDRESS)
 
     def test_sends_from_naver_account_to_gmail(self) -> None:
-        self.assertIn(SENDER_ADDRESS, self.message["From"])
+        _, actual_sender_address = read_sender_field(self.message)
+        self.assertEqual(actual_sender_address, SENDER_ADDRESS)
         self.assertEqual(self.message["To"], RECIPIENT_ADDRESS)
+
+    def test_sender_field_shows_original_name_address_and_forwarding(self) -> None:
+        display_name, _ = read_sender_field(self.message)
+        self.assertEqual(display_name, f"홍길동 (hong@example.com) - {FORWARDED_SENDER_LABEL}")
+
+    def test_sender_field_without_original_name_shows_address(self) -> None:
+        raw_message = b"From: hong@example.com\r\nSubject: test\r\n\r\nbody\r\n"
+        message = build_forwarding_message(raw_message, SENDER_ADDRESS, RECIPIENT_ADDRESS)
+        display_name, _ = read_sender_field(message)
+        self.assertEqual(display_name, f"hong@example.com - {FORWARDED_SENDER_LABEL}")
+
+    def test_sender_field_without_original_sender_shows_only_label(self) -> None:
+        raw_message = b"Subject: test\r\n\r\nbody\r\n"
+        message = build_forwarding_message(raw_message, SENDER_ADDRESS, RECIPIENT_ADDRESS)
+        display_name, _ = read_sender_field(message)
+        self.assertEqual(display_name, FORWARDED_SENDER_LABEL)
+        self.assertIsNone(message["Reply-To"])
 
     def test_keeps_original_sender_as_reply_address(self) -> None:
         self.assertIn("hong@example.com", self.message["Reply-To"])
